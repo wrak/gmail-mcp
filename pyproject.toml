@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "multi-account-gmail-mcp"
-version = "0.7.0"
+version = "0.8.0"
 description = "Multi-account Gmail MCP server for AI agents"
 readme = "README.md"
 license = "MIT"
@@ -31,9 +31,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/cunicopia-dev/gmail-mcp"
-Repository = "https://github.com/cunicopia-dev/gmail-mcp"
-Issues = "https://github.com/cunicopia-dev/gmail-mcp/issues"
+Homepage = "https://github.com/wrak/gmail-mcp"
+Repository = "https://github.com/wrak/gmail-mcp"
+Issues = "https://github.com/wrak/gmail-mcp/issues"
 
 [project.optional-dependencies]
 dev = [

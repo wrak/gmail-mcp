@@ -119,6 +119,26 @@ tests/        — pytest; Gmail client is mocked, no live network
   `decode_b64url_bytes` (never the text decoder, which mangles binary) turns
   either form into bytes.
 - **No audit log** — intentionally not implemented.
+- **Readonly mode is a process setting, not a tool argument.**
+  `GMAIL_MCP_MODE=readonly` (`config.is_readonly`) drops `_WRITE_TOOLS` from
+  `list_tools` and `_dispatch` refuses them anyway. `gmail-mcp-auth add` then
+  requests `config.auth_scopes()` (`gmail.readonly` only) and `db_path()`
+  defaults to `tokens-readonly.db`. Do not "fix" a readonly 403 by falling
+  back to `SCOPES` or to `tokens.db`. `GMAIL_MCP_TOOLS` may only narrow the
+  set `_tool_offered` already allows.
+- **Search mutations are capped.** `trash`, `bulk_action`, and `modify_labels`
+  pass `cap_query=True` into `_resolve_selection`. The cap is
+  `config.max_bulk()` (`GMAIL_MCP_MAX_BULK`, default 100). Do not add a tool
+  argument that raises it. `count_messages` stays uncapped. Explicit ids are
+  not capped.
+- **Filter mutators are off by default.** `create_filter` / `delete_filter`
+  require `GMAIL_MCP_ENABLE_FILTERS=1` (`config.filters_enabled`).
+  `list_filters` does not. A new filter tool must go through the same gate.
+- **Reply drafts flag strangers.** `_do_create_draft` compares To/Cc/Bcc with
+  `recipients_outside` against addresses already on the thread (plus the
+  account). A miss prepends `*** SUSPICIOUS DRAFT ***` and still creates the
+  draft. Do not drop the banner to make a test's exact string match — extend
+  the test.
 
 ## Gotchas
 

@@ -28,7 +28,7 @@ import subprocess
 import sys
 import time
 
-from gmail_mcp.config import SCOPES, client_secret_path
+from gmail_mcp.config import auth_scopes, client_secret_path, db_path, is_readonly, mode
 from gmail_mcp.store import TokenStore
 
 
@@ -83,7 +83,20 @@ def _add() -> int:
         )
         return 1
 
-    flow = InstalledAppFlow.from_client_secrets_file(str(secret), SCOPES)
+    scopes = auth_scopes()
+    if is_readonly():
+        print(
+            "Readonly grant: requesting gmail.readonly only. The token cannot "
+            "draft, label, trash, filter, or send mail.\n"
+            f"Tokens will be stored separately at {db_path()}."
+        )
+    else:
+        print(
+            "Full grant: read, draft, label, and filter. Mail is never sent.\n"
+            f"Tokens will be stored at {db_path()}."
+        )
+
+    flow = InstalledAppFlow.from_client_secrets_file(str(secret), scopes)
     # Fixed port + no auto-launch: this server is headless. The flow prints an
     # auth URL you open in a browser on your own machine; the redirect comes
     # back to localhost:OAUTH_PORT, so SSH-forward that port (-L 8765:localhost:8765)
@@ -136,10 +149,16 @@ def _add() -> int:
         email=email,
         refresh_token=creds.refresh_token,
         token=json.dumps({"access_token": creds.token}),
-        scopes=" ".join(SCOPES),
+        scopes=" ".join(scopes),
     )
     print(f"Authorized and stored: {email}")
     print(f"Token store: {store.path}")
+    if is_readonly():
+        print(
+            "This token is not in the full-access store. Run the everyday "
+            "server with GMAIL_MCP_MODE=readonly so it uses this file, and "
+            "do not point that server at the full-access database."
+        )
     return 0
 
 
@@ -177,6 +196,12 @@ def main(argv: list[str] | None = None) -> int:
     rm.add_argument("email", help="email address of the account to remove")
 
     args = parser.parse_args(argv)
+
+    try:
+        mode()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
 
     if args.command == "add":
         return _add()

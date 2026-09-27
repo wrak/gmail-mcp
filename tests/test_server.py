@@ -416,7 +416,8 @@ def test_list_filters_dispatch(fake_service):
     assert "TRASH" in out and "INBOX" in out
 
 
-def test_create_filter_convenience_flags(fake_service):
+def test_create_filter_convenience_flags(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
     out = server._dispatch("create_filter", {
         "account": "a@example.com",
         "from_address": "spam@x.com OR promo@y.com",
@@ -428,7 +429,8 @@ def test_create_filter_convenience_flags(fake_service):
     assert body["action"]["addLabelIds"] == ["TRASH"]
 
 
-def test_create_filter_archive_and_label(fake_service):
+def test_create_filter_archive_and_label(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
     server._dispatch("create_filter", {
         "account": "a@example.com",
         "subject": "receipt",
@@ -442,13 +444,15 @@ def test_create_filter_archive_and_label(fake_service):
     assert set(body["action"]["removeLabelIds"]) == {"INBOX", "UNREAD"}
 
 
-def test_create_filter_requires_criteria(fake_service):
+def test_create_filter_requires_criteria(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
     out = server._dispatch("create_filter", {"account": "a@example.com", "delete": True})
     assert "no criteria" in out
     assert "filter_create" not in fake_service.recorder
 
 
-def test_create_filter_requires_action(fake_service):
+def test_create_filter_requires_action(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
     out = server._dispatch("create_filter", {
         "account": "a@example.com", "from_address": "x@y.com",
     })
@@ -456,14 +460,16 @@ def test_create_filter_requires_action(fake_service):
     assert "filter_create" not in fake_service.recorder
 
 
-def test_create_filter_unknown_label(fake_service):
+def test_create_filter_unknown_label(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
     with pytest.raises(ValueError, match="Unknown label"):
         server._dispatch("create_filter", {
             "account": "a@example.com", "subject": "x", "add_labels": ["Nope"],
         })
 
 
-def test_delete_filter_dispatch(fake_service):
+def test_delete_filter_dispatch(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
     out = server._dispatch("delete_filter", {
         "account": "a@example.com", "filter_id": "filt_1",
     })
@@ -792,3 +798,148 @@ def test_download_tool_is_registered():
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
     assert "download_attachments" in names
+
+
+# --- hard limits (mode, allowlist, bulk cap, suspicious drafts) -------------
+
+
+def _tool_names() -> set[str]:
+    return {tool.name for tool in asyncio.run(server.list_tools())}
+
+
+def test_known_tools_match_the_ungated_surface(monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MODE", "full")
+    monkeypatch.delenv("GMAIL_MCP_TOOLS", raising=False)
+    monkeypatch.setenv("GMAIL_MCP_ENABLE_FILTERS", "1")
+    assert _tool_names() == set(server._KNOWN_TOOLS)
+
+
+def test_readonly_hides_write_tools_and_refuses_calls(monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MODE", "readonly")
+    monkeypatch.delenv("GMAIL_MCP_TOOLS", raising=False)
+    names = _tool_names()
+    assert "search_messages" in names
+    assert "list_filters" in names
+    assert "list_drafts" in names
+    for write in server._WRITE_TOOLS:
+        assert write not in names
+        with pytest.raises(ValueError, match="readonly mode"):
+            server._dispatch(write, {"account": "a@example.com", "body": "x"})
+
+
+def test_allowlist_cannot_reenable_writes_in_readonly(monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MODE", "readonly")
+    monkeypatch.setenv("GMAIL_MCP_TOOLS", "list_accounts,trash,create_draft")
+    assert _tool_names() == {"list_accounts"}
+    with pytest.raises(ValueError, match="readonly mode"):
+        server._dispatch("trash", {"account": "a@example.com", "message_id": "m1"})
+
+
+def test_allowlist_in_full_mode_can_keep_a_write_tool(monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MODE", "full")
+    monkeypatch.setenv("GMAIL_MCP_TOOLS", "list_accounts,create_draft")
+    assert _tool_names() == {"list_accounts", "create_draft"}
+    with pytest.raises(ValueError, match="allowlist"):
+        server._dispatch("search_messages", {"account": "a@example.com", "query": "x"})
+
+
+def test_filter_mutators_off_by_default(monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MODE", "full")
+    monkeypatch.delenv("GMAIL_MCP_TOOLS", raising=False)
+    monkeypatch.delenv("GMAIL_MCP_ENABLE_FILTERS", raising=False)
+    names = _tool_names()
+    assert "list_filters" in names
+    assert "create_filter" not in names
+    assert "delete_filter" not in names
+    with pytest.raises(ValueError, match="GMAIL_MCP_ENABLE_FILTERS"):
+        server._dispatch("create_filter", {
+            "account": "a@example.com", "from_address": "a@b.com", "delete": True,
+        })
+
+
+def test_search_mutation_over_cap_is_refused(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MAX_BULK", "1")
+    with pytest.raises(ValueError, match="GMAIL_MCP_MAX_BULK"):
+        server._dispatch("trash", {
+            "account": "a@example.com", "query": "from:google.com",
+        })
+    assert "batchModify" not in fake_service.recorder
+    with pytest.raises(ValueError, match="more than 1"):
+        server._dispatch("bulk_action", {
+            "account": "a@example.com",
+            "action": "archive",
+            "query": "from:google.com",
+        })
+    with pytest.raises(ValueError, match="more than 1"):
+        server._dispatch("modify_labels", {
+            "account": "a@example.com",
+            "query": "from:google.com",
+            "remove": ["INBOX"],
+        })
+
+
+def test_explicit_ids_are_not_subject_to_the_search_cap(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MAX_BULK", "1")
+    out = server._dispatch("trash", {
+        "account": "a@example.com", "message_ids": ["m1", "m2"],
+    })
+    assert "2 message(s)" in out
+    assert fake_service.recorder["batchModify"]["body"]["ids"] == ["m1", "m2"]
+
+
+def test_count_messages_is_not_capped(fake_service, monkeypatch):
+    monkeypatch.setenv("GMAIL_MCP_MAX_BULK", "1")
+    out = server._dispatch("count_messages", {
+        "account": "a@example.com", "query": "from:google.com",
+    })
+    assert out.startswith("2 message")
+
+
+def test_reply_to_a_thread_participant_is_not_flagged(fake_service):
+    out = server._dispatch("create_draft", {
+        "account": "a@example.com", "reply_to_message_id": "m1", "body": "text",
+    })
+    assert "SUSPICIOUS DRAFT" not in out
+    assert out.startswith("Created draft")
+
+
+def test_reply_that_adds_an_outsider_is_flagged_but_still_created(fake_service):
+    out = server._dispatch("create_draft", {
+        "account": "a@example.com",
+        "reply_to_message_id": "m1",
+        "to": "someone@else.com",
+        "body": "text",
+    })
+    assert out.startswith("*** SUSPICIOUS DRAFT")
+    assert "someone@else.com" in out
+    assert "Created draft d1" in out
+    assert fake_service.recorder["draft_create"]["body"]["message"]["threadId"] == "t1"
+
+
+def test_reply_bcc_to_an_outsider_is_flagged(fake_service):
+    out = server._dispatch("create_draft", {
+        "account": "a@example.com",
+        "reply_to_message_id": "m1",
+        "body": "text",
+        "bcc": "eve@evil.com",
+    })
+    assert "SUSPICIOUS DRAFT" in out
+    assert "eve@evil.com" in out
+    assert fake_service.recorder["draft_create"]["body"]["message"]["raw"]
+
+
+def test_standalone_draft_is_not_flagged(fake_service):
+    out = server._dispatch("create_draft", {
+        "account": "a@example.com", "to": "b@c.com", "subject": "Hi", "body": "text",
+    })
+    assert out == "Created draft d1."
+
+
+def test_reply_all_to_existing_recipients_is_not_flagged(fake_service):
+    out = server._dispatch("create_draft", {
+        "account": "a@example.com",
+        "reply_to_message_id": "m1",
+        "body": "text",
+        "reply_all": True,
+    })
+    assert "SUSPICIOUS DRAFT" not in out

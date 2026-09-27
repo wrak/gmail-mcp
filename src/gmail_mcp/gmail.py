@@ -708,6 +708,51 @@ def build_reply_fields(
 _HEADER_BREAK_RE = re.compile(r"[\r\n]+")
 
 
+def addresses_in(*values: str | None) -> set[str]:
+    """Lowercased email addresses parsed out of header-like strings."""
+    found: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        for _, addr in getaddresses([value]):
+            key = addr.strip().lower()
+            if key:
+                found.add(key)
+    return found
+
+
+def recipients_outside(participants: set[str], *recipient_fields: str | None) -> list[str]:
+    """Recipient addresses that are not already thread participants.
+
+    ``participants`` is a set of lowercase addresses. The returned strings keep
+    the spelling from the recipient field (newlines flattened) so a warning can
+    show exactly what would be mailed. An unparseable field is returned as-is:
+    a reply must not be able to skip this check by breaking the address parser.
+    Order is first-seen; comparison is case-insensitive.
+    """
+    known = {p.strip().lower() for p in participants if p and p.strip()}
+    outside: list[str] = []
+    seen: set[str] = set()
+    for value in recipient_fields:
+        if value is None or not value.strip():
+            continue
+        flat = _HEADER_BREAK_RE.sub(" ", value).strip()
+        parsed = [addr.strip() for _, addr in getaddresses([flat]) if addr.strip()]
+        if not parsed:
+            key = flat.lower()
+            if key not in seen:
+                seen.add(key)
+                outside.append(flat)
+            continue
+        for addr in parsed:
+            key = addr.lower()
+            if key in known or key in seen:
+                continue
+            seen.add(key)
+            outside.append(addr)
+    return outside
+
+
 def _header_safe(value: str) -> str:
     """Flatten a header value onto one line.
 

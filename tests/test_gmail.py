@@ -20,6 +20,7 @@ from gmail_mcp.gmail import (
     format_thread,
     parse_headers,
     parse_message,
+    recipients_outside,
     resolve_label_ids,
     sanitize_filename,
     screen_attachment,
@@ -478,6 +479,31 @@ def test_build_reply_fields_without_message_id_omits_threading_headers():
     assert "in_reply_to" not in fields
     assert "references" not in fields
     assert fields["subject"] == "Re: Terminanfrage"
+
+
+def test_recipients_outside_ignores_participants_case_insensitively():
+    known = {"praxis@example.com", "me@example.com"}
+    assert recipients_outside(known, "Praxis <praxis@example.com>", "me@example.com") == []
+
+
+def test_recipients_outside_reports_only_new_addresses():
+    known = {"praxis@example.com"}
+    assert recipients_outside(
+        known, "praxis@example.com, Eve <eve@evil.com>", None, "bcc@evil.com"
+    ) == ["eve@evil.com", "bcc@evil.com"]
+
+
+def test_recipients_outside_does_not_treat_garbage_as_a_participant():
+    # The address parser may keep only a token ("not"). What matters is that
+    # the field is not silently accepted as someone already on the thread.
+    assert recipients_outside(set(), "not an address")
+
+
+def test_recipients_outside_flags_a_smuggled_address_after_flattening():
+    known = {"a@b.com"}
+    outside = recipients_outside(known, "a@b.com\r\nBcc: eve@evil.com")
+    assert outside
+    assert any("eve@evil.com" in item for item in outside)
 
 
 # --- header flattening ------------------------------------------------------

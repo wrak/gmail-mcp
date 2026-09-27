@@ -87,3 +87,19 @@ The server is headless, so the login happens in your laptop browser but the
 
 That's it. The MCP server reads those stored tokens — no further login needed.
 To remove an account later: `gmail-mcp-auth remove you@gmail.com`.
+
+### Readonly grant
+
+For a session that only summarizes mail, authorize a separate token that cannot
+write. The same `GMAIL_MCP_MODE=readonly` must be set for `add`, `list`, and
+`remove`, and for the server — otherwise you are looking at the other database.
+
+```bash
+GMAIL_MCP_MODE=readonly gmail-mcp-auth add
+GMAIL_MCP_MODE=readonly gmail-mcp-auth list
+```
+
+Google is asked only for `gmail.readonly`. The token lands in
+`~/.gmail-mcp/tokens-readonly.db`, not in `tokens.db`. Re-run `add` under that
+mode for each account you want the readonly server to see. A full-access token
+already in `tokens.db` is not converted; the readonly file starts empty.

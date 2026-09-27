@@ -2,17 +2,17 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cunicopia-dev/multi-account-gmail-mcp",
   "title": "Multi-Account Gmail",
-  "description": "Multi-account Gmail MCP server \u2014 read, search, draft, and label across every inbox.",
+  "description": "Multi-account Gmail MCP server \u2014 read, search, draft, and label across every inbox. Hardened fork: readonly mode, bulk cap, filters off by default.",
   "repository": {
-    "url": "https://github.com/cunicopia-dev/gmail-mcp",
+    "url": "https://github.com/wrak/gmail-mcp",
     "source": "github"
   },
-  "version": "0.7.0",
+  "version": "0.8.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "multi-account-gmail-mcp",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "transport": {
         "type": "stdio"
       },
@@ -56,6 +56,34 @@
         {
           "name": "GMAIL_MCP_MAX_BODY_CHARS",
           "description": "Default cap on returned message body length. Defaults to 500. Pass max_body_chars=0 on a call for the full body.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "GMAIL_MCP_MODE",
+          "description": "full (default) or readonly. Readonly does not offer write tools. gmail-mcp-auth add then requests only gmail.readonly and stores tokens in tokens-readonly.db unless GMAIL_MCP_DB is set.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "GMAIL_MCP_TOOLS",
+          "description": "Comma-separated allowlist of tool names. Can only narrow what the mode already allows. Unset means no allowlist.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "GMAIL_MCP_MAX_BULK",
+          "description": "Refuse search-based trash, bulk_action, and modify_labels above this many matches. Default 100. 0 refuses every search mutation. Negative disables the cap.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "GMAIL_MCP_ENABLE_FILTERS",
+          "description": "Set to 1 to offer create_filter and delete_filter. Off by default. list_filters does not need this.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

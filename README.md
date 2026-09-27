@@ -4,12 +4,19 @@
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![tests: 74 passing](https://img.shields.io/badge/tests-74_passing-brightgreen)
+![tests: 167 passing](https://img.shields.io/badge/tests-167_passing-brightgreen)
 ![storage: SQLite](https://img.shields.io/badge/storage-SQLite-003B57?logo=sqlite&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-ready-FF6F00)
 
 **An [MCP](https://modelcontextprotocol.io) server that reads across _all_ your
 Gmail accounts from one connection.**
+
+> Hardened fork of [cunicopia-dev/gmail-mcp](https://github.com/cunicopia-dev/gmail-mcp).
+> Adds a real readonly mode (separate token, `gmail.readonly` only), a search-action
+> cap, filters off by default, and a loud flag when a reply draft adds someone who
+> is not already on the thread. The untrusted-content fence is unchanged and is
+> not the protection — these limits are. PyPI still ships the upstream package;
+> install this fork from source if you want the limits.
 
 Most Gmail integrations — including the native connectors — bind a single
 account per OAuth grant: connect a second inbox and you disconnect the first.
@@ -108,17 +115,17 @@ Every tool except `list_accounts` and `search_all_accounts` takes an `account`
 | `read_thread` | `account`, `thread_id`, `max_body_chars?` | Every message in the thread, in order. Each body capped by default; `max_body_chars=0` for full. |
 | `download_attachments` | `account`, `message_id`, `index?` | Save a message's attachments to disk and return absolute paths. Address them by the `#N` shown in `read_message`; omit `index` for all of them. Fixed download root, no destination argument. Dangerous file types and anything on a spam-labeled message are refused. |
 | `search_all_accounts` | `query`, `max_results_per_account=10` | One search across **every** account, each result tagged by account. |
-| `create_draft` | `account`, `body`, `to?`, `subject?`, `cc?`, `bcc?`, `html=false`, `reply_to_message_id?`, `reply_all=false`, `from_addr?` | A draft (not sent). Returns the draft id. With `reply_to_message_id` the draft is a reply inside that message's thread: recipient, subject, `In-Reply-To`, `References` and the thread id come from it, and `to`/`subject` become optional overrides. Without it, `to` and `subject` are required. `from_addr` sets the `From` header for a verified send-as alias; it defaults to the account address. |
+| `create_draft` | `account`, `body`, `to?`, `subject?`, `cc?`, `bcc?`, `html=false`, `reply_to_message_id?`, `reply_all=false`, `from_addr?` | A draft (not sent). Returns the draft id. With `reply_to_message_id` the draft is a reply inside that message's thread: recipient, subject, `In-Reply-To`, `References` and the thread id come from it, and `to`/`subject` become optional overrides. Without it, `to` and `subject` are required. A reply that adds a recipient who is not already on the thread is created but marked `SUSPICIOUS DRAFT`. `from_addr` sets the `From` header for a verified send-as alias; it defaults to the account address. |
 | `list_drafts` | `account`, `max_results=20` | Draft ids in the account. |
 | `list_labels` | `account` | The account's labels (name + id). |
-| `modify_labels` | `account`, selection (`message_id` \| `message_ids` \| `query`), `add?`, `remove?` | Add/remove labels on a **selection** (one id, a list, or everything a query matches), batched 1000/call. General mutator: archive = remove INBOX, mark-read = remove UNREAD, star = add STARRED. |
-| `trash` | `account`, selection (`message_id` \| `message_ids` \| `query`) | Move a selection to Trash (recoverable 30 days; not permanent delete). Refuses an empty selection. |
-| `bulk_action` | `account`, `action`, selection (`message_id` \| `message_ids` \| `query`) | Friendly verb layer over `modify_labels`. `action` ∈ `archive`/`unarchive`/`mark_read`/`mark_unread`/`star`/`unstar`/`spam`/`unspam`/`trash`/`untrash`. Batched 1000/call; refuses an empty selection. |
+| `modify_labels` | `account`, selection (`message_id` \| `message_ids` \| `query`), `add?`, `remove?` | Add/remove labels on a **selection** (one id, a list, or everything a query matches), batched 1000/call. General mutator: archive = remove INBOX, mark-read = remove UNREAD, star = add STARRED. A search matching more than `GMAIL_MCP_MAX_BULK` (default 100) is refused. |
+| `trash` | `account`, selection (`message_id` \| `message_ids` \| `query`) | Move a selection to Trash (recoverable 30 days; not permanent delete). Refuses an empty selection and any search over the bulk cap. |
+| `bulk_action` | `account`, `action`, selection (`message_id` \| `message_ids` \| `query`) | Friendly verb layer over `modify_labels`. `action` ∈ `archive`/`unarchive`/`mark_read`/`mark_unread`/`star`/`unstar`/`spam`/`unspam`/`trash`/`untrash`. Batched 1000/call; refuses an empty selection and any search over the bulk cap. |
 | `read_messages` | `account`, `message_ids` \| `query`, `max_results=25` | Batch-read full content of many messages in one call (vs. N `read_message` calls). |
 | `count_messages` | `query`, `account?`, `all_accounts=false` | Count matches **without** fetching content — blast-radius check before a bulk action. `all_accounts` gives a per-account breakdown + total. |
 | `list_filters` | `account` | The account's filters: id, criteria, actions (label ids shown as names). |
-| `create_filter` | `account`, one of `from_address`/`to_address`/`subject`/`query`/`has_attachment`, plus an action (`archive`/`mark_read`/`delete`/`star` or `add_labels`/`remove_labels`) | A server-side rule applied to **incoming** mail. Can't forward off-account. |
-| `delete_filter` | `account`, `filter_id` | Remove a filter by id (leaves already-acted-on mail alone). |
+| `create_filter` | `account`, one of `from_address`/`to_address`/`subject`/`query`/`has_attachment`, plus an action (`archive`/`mark_read`/`delete`/`star` or `add_labels`/`remove_labels`) | A server-side rule applied to **incoming** mail. Can't forward off-account. **Off unless `GMAIL_MCP_ENABLE_FILTERS=1`.** |
+| `delete_filter` | `account`, `filter_id` | Remove a filter by id (leaves already-acted-on mail alone). **Off unless `GMAIL_MCP_ENABLE_FILTERS=1`.** |
 
 ---
 
@@ -388,6 +395,36 @@ low-stakes:
   here means "not an obvious weapon," never "scanned and safe." The saved file's
   *contents* remain untrusted third-party data.
 
+- **Readonly mode removes the write tools, and the token.** Set
+  `GMAIL_MCP_MODE=readonly` and the server does not offer `trash`,
+  `bulk_action`, `modify_labels`, `create_draft`, `create_filter`,
+  `delete_filter`, or `download_attachments`. The same variable makes
+  `gmail-mcp-auth add` request only `gmail.readonly` and store the grant in
+  `~/.gmail-mcp/tokens-readonly.db`, separate from the full-access database.
+  A stolen readonly token cannot trash, filter, or draft, because Google never
+  granted it those scopes. `GMAIL_MCP_TOOLS` is a comma-separated allowlist that
+  can only narrow this further — it cannot turn write tools back on in readonly
+  mode. Point everyday "summarize my inbox" sessions at the readonly instance.
+  Turn on the full instance deliberately, ideally in a session that is not also
+  reading unknown mail.
+
+- **Search mutations have a hard cap.** `trash`, `bulk_action`, and
+  `modify_labels` refuse a query that matches more than `GMAIL_MCP_MAX_BULK`
+  messages (default 100). The model cannot pass a higher number. Explicit
+  message ids are not capped. `count_messages` is not capped — it is the check
+  you run before acting. Set the variable to `0` to refuse every search-based
+  mutation, or to a negative number to disable the cap.
+
+- **Filter create/delete are off by default.** A filter keeps working after the
+  session ends, which is the nastiest outcome of an injection (an auto-trash
+  rule you did not notice). `list_filters` stays available. Set
+  `GMAIL_MCP_ENABLE_FILTERS=1` to turn the mutators on.
+
+- **Reply drafts that add a stranger are flagged.** If `create_draft` is a reply
+  and To, Cc, or Bcc contains an address that does not appear on the thread,
+  the result starts with `*** SUSPICIOUS DRAFT ***`. The draft is still created
+  — you review it before sending — but it does not look like an ordinary reply.
+
 **Known limitation.** This only governs *this* server's surface. If the same
 agent session also has a tool that can reach the open internet (web fetch, HTTP),
 that's a separate egress path `gmail-mcp` can't do anything about — pairing it
@@ -418,7 +455,7 @@ uvx multi-account-gmail-mcp
 From source (for development):
 
 ```bash
-git clone https://github.com/cunicopia-dev/gmail-mcp.git
+git clone https://github.com/wrak/gmail-mcp.git
 cd gmail-mcp
 python -m venv .venv && source .venv/bin/activate
 pip install -e .            # add ".[dev]" for ruff + pytest
@@ -466,6 +503,10 @@ All optional — sane defaults under `~/.gmail-mcp/`.
 | `GMAIL_MCP_ATTACHMENT_DIR` | `~/.gmail-mcp/attachments` | Download root for `download_attachments`. Files land in a per-message subdirectory. This is the only location the server writes to. |
 | `GMAIL_MCP_MAX_ATTACHMENT_BYTES` | `26214400` (25 MB) | Per-attachment size ceiling. Gmail's own limit is 25 MB, so this refuses nothing Gmail would deliver. `0` (or negative) means unlimited. |
 | `GMAIL_MCP_MAX_BODY_CHARS` | `500` | Default per-message body cap for `read_message`/`read_thread`. Deliberately tight so reads are cheap by default; `0` (or negative) means unlimited, and a per-call `max_body_chars` argument overrides it. |
+| `GMAIL_MCP_MODE` | `full` | `full` or `readonly`. Readonly does not offer write tools. `gmail-mcp-auth add` then requests only `gmail.readonly` and, unless `GMAIL_MCP_DB` is set, stores tokens in `tokens-readonly.db`. Any other value is an error (a typo must not silently enable writes). |
+| `GMAIL_MCP_TOOLS` | *(unset — no allowlist)* | Comma-separated tool names this process may offer. Can only narrow what the mode already allows. Blank means unset. |
+| `GMAIL_MCP_MAX_BULK` | `100` | Refuse `trash` / `bulk_action` / `modify_labels` when a **search** selects more than this many messages. `0` refuses every search-based mutation. Negative disables the cap. Explicit message ids are not capped. |
+| `GMAIL_MCP_ENABLE_FILTERS` | *(off)* | Set to `1` to offer `create_filter` and `delete_filter`. `list_filters` does not need this. |
 
 ---
 
@@ -501,6 +542,30 @@ explicitly when needed (some clients don't expand `~`):
 }
 ```
 
+Everyday inbox reading should be a second, readonly server. Authorize it
+separately so its token is actually readonly:
+
+```bash
+GMAIL_MCP_MODE=readonly gmail-mcp-auth add
+```
+
+```json
+{
+  "mcpServers": {
+    "gmail-readonly": {
+      "command": "gmail-mcp",
+      "env": {
+        "GMAIL_MCP_MODE": "readonly"
+      }
+    }
+  }
+}
+```
+
+Do not point that instance at the full-access `tokens.db`. The separate file is
+what makes a stolen token unable to write. Use the full server only when you
+mean to clean up mail, ideally in a session that is not also reading unknown mail.
+
 ---
 
 ## Development
@@ -508,7 +573,7 @@ explicitly when needed (some clients don't expand `~`):
 ```bash
 pip install -e ".[dev]"
 ruff check .
-pytest                       # 48 tests, no network — the Gmail client is mocked
+pytest                       # no network — the Gmail client is mocked
 ```
 
 Tests cover the pure layers — MIME parsing/decoding, label name→id resolution,
