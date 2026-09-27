@@ -16,7 +16,7 @@ Gmail accounts from one connection.**
 > cap, filters off by default, and a loud flag when a reply draft adds someone who
 > is not already on the thread. The untrusted-content fence is unchanged and is
 > not the protection — these limits are. PyPI still ships the upstream package;
-> install this fork from source if you want the limits.
+> install this fork with `uv tool install` (see [Install](#install)).
 
 Most Gmail integrations — including the native connectors — bind a single
 account per OAuth grant: connect a second inbox and you disconnect the first.
@@ -439,30 +439,35 @@ secrets are hardcoded — `client_id`/`client_secret` come from your downloaded
 
 ## Install
 
-Requires Python 3.12+. The PyPI distribution is **`multi-account-gmail-mcp`**
-(the bare `gmail-mcp` name is taken); it installs the `gmail-mcp` and
-`gmail-mcp-auth` commands.
+Requires Python 3.12+. Install **this fork**, not the PyPI package. `pip install
+multi-account-gmail-mcp`, `uv tool install multi-account-gmail-mcp`, and `uvx
+multi-account-gmail-mcp` all install upstream, which does not have readonly mode
+or the caps.
+
+`uv` puts both commands on `PATH`:
 
 ```bash
-# From PyPI
-pip install multi-account-gmail-mcp
-# or, to get the commands on PATH globally:
-uv tool install multi-account-gmail-mcp     # or: pipx install multi-account-gmail-mcp
-# or run without installing:
-uvx multi-account-gmail-mcp
+uv tool install "git+https://github.com/wrak/gmail-mcp.git"
+gmail-mcp --version    # gmail-mcp 0.8.0
 ```
 
-From source (for development):
+That installs **`gmail-mcp`** (the stdio server) and **`gmail-mcp-auth`** (the
+account-authorization CLI). The distribution name is still
+`multi-account-gmail-mcp` (the bare `gmail-mcp` name is taken). Upgrade later
+with:
+
+```bash
+uv tool upgrade multi-account-gmail-mcp
+```
+
+A local checkout is only needed for development:
 
 ```bash
 git clone https://github.com/wrak/gmail-mcp.git
 cd gmail-mcp
 python -m venv .venv && source .venv/bin/activate
-pip install -e .            # add ".[dev]" for ruff + pytest
+pip install -e ".[dev]"     # ruff + pytest; drop ".[dev]" to just run it
 ```
-
-This installs two console scripts: **`gmail-mcp`** (the stdio server) and
-**`gmail-mcp-auth`** (the account-authorization CLI).
 
 ---
 
@@ -473,21 +478,39 @@ authorization per account. The full click-by-click — creating the Google Cloud
 project, enabling the Gmail API, publishing the consent screen, and the headless
 SSH-forward step — is in **[docs/SETUP.md](docs/SETUP.md)**. The short version:
 
+Everyday inbox reading should use the readonly grant. The same
+`GMAIL_MCP_MODE=readonly` has to be set for `add`, `list`, and `remove`, and for
+the server — otherwise you are looking at the other database.
+
 ```bash
 # 1. Drop your downloaded OAuth client here:
 mkdir -p ~/.gmail-mcp && mv ~/Downloads/client_secret_*.json ~/.gmail-mcp/client_secret.json
 
-# 2. Authorize an account (prints a URL to open in a browser; repeat per account).
+# 2. Authorize an account for the readonly server (prints a URL; repeat per account).
 #    On a headless server, SSH in with -L 8765:localhost:8765 first.
-gmail-mcp-auth add
+#    Google is asked only for gmail.readonly. The token lands in
+#    ~/.gmail-mcp/tokens-readonly.db, not tokens.db.
+GMAIL_MCP_MODE=readonly gmail-mcp-auth add
 
 # 3. Confirm what's authorized.
-gmail-mcp-auth list
+GMAIL_MCP_MODE=readonly gmail-mcp-auth list
 
-# 4. Point your MCP client at the `gmail-mcp` command (see below).
+# 4. Point your MCP client at `gmail-mcp` with GMAIL_MCP_MODE=readonly (see below).
 ```
 
-Remove an account later with `gmail-mcp-auth remove you@gmail.com`.
+A full-access token is a separate command, without that variable, and only when
+you mean to clean up mail:
+
+```bash
+gmail-mcp-auth add
+gmail-mcp-auth list
+```
+
+That store is `~/.gmail-mcp/tokens.db`. An existing full token is not converted
+into a readonly one; the readonly file starts empty. Remove an account from
+whichever store you authorized it in: `GMAIL_MCP_MODE=readonly gmail-mcp-auth
+remove you@gmail.com`, or `gmail-mcp-auth remove you@gmail.com` for the full
+store.
 
 ---
 
@@ -512,47 +535,13 @@ All optional — sane defaults under `~/.gmail-mcp/`.
 
 ## Register with an MCP client
 
-The server speaks stdio. Point your client's `mcpServers` config at the
-`gmail-mcp` command:
+The server speaks stdio. After `uv tool install`, `gmail-mcp` is on `PATH`.
+Everyday reading should be the readonly server:
 
 ```json
 {
   "mcpServers": {
     "gmail": {
-      "command": "/path/to/gmail-mcp/.venv/bin/gmail-mcp"
-    }
-  }
-}
-```
-
-If `gmail-mcp` is on `PATH`, `"command": "gmail-mcp"` is enough. Override paths
-explicitly when needed (some clients don't expand `~`):
-
-```json
-{
-  "mcpServers": {
-    "gmail": {
-      "command": "/path/to/gmail-mcp/.venv/bin/gmail-mcp",
-      "env": {
-        "GMAIL_MCP_DB": "/home/you/.gmail-mcp/tokens.db",
-        "GMAIL_MCP_CLIENT_SECRET": "/home/you/.gmail-mcp/client_secret.json"
-      }
-    }
-  }
-}
-```
-
-Everyday inbox reading should be a second, readonly server. Authorize it
-separately so its token is actually readonly:
-
-```bash
-GMAIL_MCP_MODE=readonly gmail-mcp-auth add
-```
-
-```json
-{
-  "mcpServers": {
-    "gmail-readonly": {
       "command": "gmail-mcp",
       "env": {
         "GMAIL_MCP_MODE": "readonly"
@@ -563,8 +552,37 @@ GMAIL_MCP_MODE=readonly gmail-mcp-auth add
 ```
 
 Do not point that instance at the full-access `tokens.db`. The separate file is
-what makes a stolen token unable to write. Use the full server only when you
-mean to clean up mail, ideally in a session that is not also reading unknown mail.
+what makes a stolen token unable to write. Use a full server only when you mean
+to clean up mail, ideally in a session that is not also reading unknown mail:
+
+```json
+{
+  "mcpServers": {
+    "gmail-full": {
+      "command": "gmail-mcp"
+    }
+  }
+}
+```
+
+Override paths explicitly when the client does not expand `~`, or when you
+installed from a checkout instead of `uv tool install`. If you set
+`GMAIL_MCP_DB` on the readonly server, point it at `tokens-readonly.db` — the
+default separate file is what makes a stolen token unable to write.
+
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "/path/to/gmail-mcp/.venv/bin/gmail-mcp",
+      "env": {
+        "GMAIL_MCP_MODE": "readonly",
+        "GMAIL_MCP_CLIENT_SECRET": "/home/you/.gmail-mcp/client_secret.json"
+      }
+    }
+  }
+}
+```
 
 ---
 
